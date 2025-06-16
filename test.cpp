@@ -40,9 +40,10 @@ int main() {
 	ShowWindow(hwnd, SW_SHOW);
 	UpdateWindow(hwnd);
 
-	AudioEngine *engine = new AudioEngine([](float *dest, int frames, int channels, int sampleRateHz, void *userdata) {
+	WASAPIContext *engine = new WASAPIContext([](float *dest, int frames, int channels, int sampleRateHz, void *userdata) {
 
 	}, nullptr);
+
 	engine->EnumerateOutputDevices();
 	engine->InitializeDevice(LatencyMode::Aggressive);
 
