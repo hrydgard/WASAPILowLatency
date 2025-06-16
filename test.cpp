@@ -49,13 +49,14 @@ int main() {
 	ShowWindow(hwnd, SW_SHOW);
 	UpdateWindow(hwnd);
 
-	WASAPIContext *engine = new WASAPIContext([](float *dest, int frames, int channels, int sampleRateHz, void *userdata) {
+	WASAPIContext *engine = new WASAPIContext();
+	engine->SetRenderCallback([](float *dest, int framesToWrite, int channels, int sampleRateHz, void *userdata) {
 		static double phase = 0.0;
 
 		float* fBuffer = dest;
 		double phaseStep = 2.0 * 3.14159265358979323846 * FREQUENCY / SAMPLE_RATE;
 
-		for (int i = 0; i < frames; ++i) {
+		for (int i = 0; i < framesToWrite; ++i) {
 			float sample = playTone ? static_cast<float>(sin(phase)) : 0.0f;
 			phase += phaseStep;
 			if (phase > 2.0 * 3.14159265358979323846) phase -= 2.0 * 3.14159265358979323846;
@@ -64,14 +65,25 @@ int main() {
 				*fBuffer++ = sample;
 			}
 		}
+
+		static int count = 0;
+		count++;
+		if (count < 10) {
+			printf("%d framesToWrite\n", framesToWrite);
+		}
 	}, nullptr);
 
-	engine->EnumerateOutputDevices();
+	std::vector<AudioDeviceDesc> devices;
+	engine->EnumerateOutputDevices(&devices);
+	for (auto &device : devices) {
+		printf("%s: %s\n", device.name.c_str(), device.uniqueId.c_str());
+	}
+
 	if (!engine->InitializeDevice(LatencyMode::Aggressive)) {
 		printf("Failed to initialize audio\n");
 		return 1;
 	}
-	printf("Initialized audio, got %.2f\n", engine->FramesToMs(engine->PeriodFrames()));
+	printf("Initialized audio, got %0.2f (period: %d buffer: %d)\n", engine->FramesToMs(engine->PeriodFrames()), engine->PeriodFrames(), engine->BufferSize());
 
 	MSG msg = {};
 	while (GetMessage(&msg, nullptr, 0, 0) > 0) {

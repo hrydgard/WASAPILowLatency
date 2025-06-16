@@ -9,10 +9,33 @@
 #include <thread>
 #include <iostream>
 #include <vector>
+#include <string_view>
 
 #include "WASAPILowLatency.h"
 
-WASAPIContext::WASAPIContext(WASAPIContext::RenderCallback callback, void *userdata) : notificationClient_(this), callback_(callback), userdata_(userdata) {
+static std::string ConvertWStringToUTF8(const std::wstring &wstr) {
+	int len = (int)wstr.size();
+	int size = (int)WideCharToMultiByte(CP_UTF8, 0, wstr.c_str(), len, 0, 0, NULL, NULL);
+	std::string s;
+	s.resize(size);
+	if (size > 0) {
+		WideCharToMultiByte(CP_UTF8, 0, wstr.c_str(), len, &s[0], size, NULL, NULL);
+	}
+	return s;
+}
+
+static std::wstring ConvertUTF8ToWString(const std::string_view source) {
+	int len = (int)source.size();
+	int size = (int)MultiByteToWideChar(CP_UTF8, 0, source.data(), len, NULL, 0);
+	std::wstring str;
+	str.resize(size);
+	if (size > 0) {
+		MultiByteToWideChar(CP_UTF8, 0, source.data(), (int)source.size(), &str[0], size);
+	}
+	return str;
+}
+
+WASAPIContext::WASAPIContext() : notificationClient_(this) {
 	HRESULT hr = CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL, __uuidof(IMMDeviceEnumerator), (void**)&enumerator_);
 	if (FAILED(hr)) {
 		// Bad!
@@ -32,7 +55,7 @@ WASAPIContext::~WASAPIContext() {
 	enumerator_->Release();
 }
 
-void WASAPIContext::EnumerateOutputDevices() {
+void WASAPIContext::EnumerateOutputDevices(std::vector<AudioDeviceDesc> *output) {
 	IMMDeviceCollection *collection = nullptr;
 	enumerator_->EnumAudioEndpoints(eRender, DEVICE_STATE_ACTIVE, &collection);
 
@@ -52,7 +75,10 @@ void WASAPIContext::EnumerateOutputDevices() {
 
 		LPWSTR id_str = 0;
 		if (SUCCEEDED(device->GetId(&id_str))) {
-			wprintf(L"Device %u: %s (id: %s)\n", i, nameProp.pwszVal, id_str);
+			AudioDeviceDesc desc;
+			desc.name = ConvertWStringToUTF8(nameProp.pwszVal);
+			desc.uniqueId = ConvertWStringToUTF8(id_str);
+			output->push_back(desc);
 			CoTaskMemFree(id_str);
 		}
 
@@ -64,17 +90,17 @@ void WASAPIContext::EnumerateOutputDevices() {
 	collection->Release();
 }
 
+
 bool WASAPIContext::InitializeDevice(LatencyMode latencyMode) {
 	Stop();
 
-	IMMDevice* device = nullptr;
+	IMMDevice *device = nullptr;
+	if (FAILED(enumerator_->GetDefaultAudioEndpoint(eRender, eConsole, &device))) {
+		return false;
+	}
 
-	// enumerator->GetDevice
-	enumerator_->GetDefaultAudioEndpoint(eRender, eConsole, &device);
-
-	// Try IAudioClient3 first
 	HRESULT hr = E_FAIL;
-	// It's probably safe anyway, but still, let's use the legacy client as a safe fallback option.
+	// Try IAudioClient3 first if not in "safe" mode. It's probably safe anyway, but still, let's use the legacy client as a safe fallback option.
 	if (latencyMode != LatencyMode::Safe) {
 		hr = device->Activate(__uuidof(IAudioClient3), CLSCTX_ALL, nullptr, (void**)&audioClient3_);
 	}
@@ -100,7 +126,9 @@ bool WASAPIContext::InitializeDevice(LatencyMode latencyMode) {
 			device = nullptr;
 			return false;
 		}
+		actualPeriodFrames_ = minPeriodFrames;
 
+		audioClient3_->GetBufferSize(&reportedBufferSize_);
 		audioClient3_->SetEventHandle(audioEvent_);
 		audioClient3_->GetService(__uuidof(IAudioRenderClient), (void**)&renderClient_);
 	} else {
@@ -133,7 +161,8 @@ bool WASAPIContext::InitializeDevice(LatencyMode latencyMode) {
 			device = nullptr;
 			return false;
 		}
-		audioClient_->GetBufferSize(&actualPeriodFrames_);
+		audioClient_->GetBufferSize(&reportedBufferSize_);
+		actualPeriodFrames_ = reportedBufferSize_;  // we don't have a better estimate.
 		audioClient_->SetEventHandle(audioEvent_);
 		audioClient_->GetService(__uuidof(IAudioRenderClient), (void**)&renderClient_);
 	}
@@ -165,12 +194,16 @@ void WASAPIContext::Stop() {
 
 void WASAPIContext::AudioLoop() {
 	DWORD taskID = 0;
-	HANDLE mmcssHandle = AvSetMmThreadCharacteristics(L"Pro Audio", &taskID);
+	HANDLE mmcssHandle = NULL;
+	if (latencyMode_ == LatencyMode::Aggressive) {
+		mmcssHandle = AvSetMmThreadCharacteristics(L"Pro Audio", &taskID);
+	}
 
-	if (audioClient3_)
+	if (audioClient3_) {
 		audioClient3_->Start();
-	else
+	} else {
 		audioClient_->Start();
+	}
 
 	double phase = 0.0;
 
@@ -189,6 +222,11 @@ void WASAPIContext::AudioLoop() {
 		if (framesToWrite > 0 && SUCCEEDED(renderClient_->GetBuffer(framesToWrite, &buffer))) {
 			callback_((float *)buffer, framesToWrite, 2, format_->nSamplesPerSec, userdata_);
 			renderClient_->ReleaseBuffer(framesToWrite, 0);
+		}
+
+		// In the old mode, we just estimate the "actualPeriodFrames_" from the framesToWrite.
+		if (audioClient_ && framesToWrite < actualPeriodFrames_) {
+			actualPeriodFrames_ = framesToWrite;
 		}
 	}
 

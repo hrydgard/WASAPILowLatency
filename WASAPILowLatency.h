@@ -7,10 +7,17 @@
 #include <cmath>
 #include <atomic>
 #include <thread>
+#include <vector>
+#include <string>
 
 enum class LatencyMode {
 	Safe,
 	Aggressive
+};
+
+struct AudioDeviceDesc {
+	std::string name;      // User-friendly name
+	std::string uniqueId;  // store-able ID for settings.
 };
 
 class WASAPIContext {
@@ -18,14 +25,19 @@ public:
 	// For absolute minimal latency, we do not use std::function. Might be overthinking, but...
 	typedef void (*RenderCallback)(float *dest, int framesToWrite, int channels, int sampleRate, void *userdata);
 
-	WASAPIContext(RenderCallback callback, void *userdata);
+	WASAPIContext();
 	~WASAPIContext();
 
-	void EnumerateOutputDevices();
+	void SetRenderCallback(RenderCallback callback, void *userdata) {
+		callback_ = callback;
+		userdata_ = userdata;
+	}
+	void EnumerateOutputDevices(std::vector<AudioDeviceDesc> *output);
 	bool InitializeDevice(LatencyMode latencyMode);
-	int PeriodFrames() const { return actualPeriodFrames_; }
+	int PeriodFrames() const { return actualPeriodFrames_; }  // NOTE: This may have the wrong value (too large) until audio has started playing.
+	int BufferSize() const { return reportedBufferSize_; }
 	float FramesToMs(int frames) const {
-		return 1000.0f * frames / format_->nSamplesPerSec;
+		return 1000.0f * (float)frames / (float)format_->nSamplesPerSec;
 	}
 
 	// Implements device change notifications
@@ -75,6 +87,7 @@ private:
 	UINT32 defaultPeriodFrames = 0, fundamentalPeriodFrames = 0, minPeriodFrames = 0, maxPeriodFrames = 0;
 	std::atomic<bool> running_ = true;
 	UINT32 actualPeriodFrames_ = 0;  // may not be the requested.
+	UINT32 reportedBufferSize_ = 0;
 	IMMDeviceEnumerator *enumerator_ = nullptr;
 	DeviceNotificationClient notificationClient_;
 	RenderCallback callback_{};
