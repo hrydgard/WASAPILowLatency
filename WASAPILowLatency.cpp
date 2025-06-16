@@ -55,9 +55,9 @@ WASAPIContext::~WASAPIContext() {
 	enumerator_->Release();
 }
 
-void WASAPIContext::EnumerateOutputDevices(std::vector<AudioDeviceDesc> *output) {
+void WASAPIContext::EnumerateDevices(std::vector<AudioDeviceDesc> *output, bool captureDevices) {
 	IMMDeviceCollection *collection = nullptr;
-	enumerator_->EnumAudioEndpoints(eRender, DEVICE_STATE_ACTIVE, &collection);
+	enumerator_->EnumAudioEndpoints(captureDevices ? eCapture : eRender, DEVICE_STATE_ACTIVE, &collection);
 
 	UINT count = 0;
 	collection->GetCount(&count);
@@ -90,7 +90,7 @@ void WASAPIContext::EnumerateOutputDevices(std::vector<AudioDeviceDesc> *output)
 	collection->Release();
 }
 
-bool WASAPIContext::InitializeDevice(std::string_view uniqueId, LatencyMode latencyMode) {
+bool WASAPIContext::InitOutputDevice(std::string_view uniqueId, LatencyMode latencyMode) {
 	Stop();
 
 	IMMDevice *device = nullptr;
@@ -111,6 +111,8 @@ bool WASAPIContext::InitializeDevice(std::string_view uniqueId, LatencyMode late
 		}
 	}
 
+	deviceId_ = uniqueId;
+
 	HRESULT hr = E_FAIL;
 	// Try IAudioClient3 first if not in "safe" mode. It's probably safe anyway, but still, let's use the legacy client as a safe fallback option.
 	if (latencyMode != LatencyMode::Safe) {
@@ -121,7 +123,7 @@ bool WASAPIContext::InitializeDevice(std::string_view uniqueId, LatencyMode late
 		audioClient3_->GetSharedModeEnginePeriod(format_, &defaultPeriodFrames, &fundamentalPeriodFrames, &minPeriodFrames, &maxPeriodFrames);
 
 		printf("default: %d fundamental: %d min: %d max: %d\n", defaultPeriodFrames, fundamentalPeriodFrames, minPeriodFrames, maxPeriodFrames);
-		printf("initializing with %d frame period at %d Hz, meaning %0.1fms\n", (int)minPeriodFrames, (int)format_->nSamplesPerSec, FramesToMs(minPeriodFrames));
+		printf("initializing with %d frame period at %d Hz, meaning %0.1fms\n", (int)minPeriodFrames, (int)format_->nSamplesPerSec, FramesToMs(minPeriodFrames, format_->nSamplesPerSec));
 
 		audioEvent_ = CreateEvent(nullptr, FALSE, FALSE, nullptr);
 		HRESULT result = audioClient3_->InitializeSharedAudioStream(
@@ -202,6 +204,14 @@ void WASAPIContext::Stop() {
 	if (audioClient_) { audioClient_->Release(); audioClient_ = nullptr; }
 	if (audioEvent_) { CloseHandle(audioEvent_); audioEvent_ = nullptr; }
 	if (format_) { CoTaskMemFree(format_); format_ = nullptr; }
+}
+
+void WASAPIContext::FrameUpdate(bool allowAutoChange) {
+	if (deviceId_.empty() && defaultDeviceChanged_ && allowAutoChange) {
+		defaultDeviceChanged_ = false;
+		Stop();
+		Start();
+	}
 }
 
 void WASAPIContext::AudioLoop() {

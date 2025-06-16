@@ -21,9 +21,15 @@
     <ClCompile Include="WASAPILowLatency.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="AudioBackend.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="WASAPILowLatency.h">
+      <Filter>Source Files</Filter>
+    </ClInclude>
+    <ClInclude Include="AudioBackend.h">
       <Filter>Source Files</Filter>
     </ClInclude>
   </ItemGroup>

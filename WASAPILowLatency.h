@@ -1,5 +1,7 @@
 #pragma once
 
+#include "AudioBackend.h"
+
 #define _WIN32_WINNT 0x0A00
 #include <windows.h>
 #include <mmdeviceapi.h>
@@ -11,36 +13,25 @@
 #include <string>
 #include <string_view>
 
-enum class LatencyMode {
-	Safe,
-	Aggressive
-};
-
-struct AudioDeviceDesc {
-	std::string name;      // User-friendly name
-	std::string uniqueId;  // store-able ID for settings.
-};
-
-class WASAPIContext {
+class WASAPIContext : public AudioBackend {
 public:
-	// For absolute minimal latency, we do not use std::function. Might be overthinking, but...
-	typedef void (*RenderCallback)(float *dest, int framesToWrite, int channels, int sampleRate, void *userdata);
-
 	WASAPIContext();
 	~WASAPIContext();
 
-	void SetRenderCallback(RenderCallback callback, void *userdata) {
+	void SetRenderCallback(RenderCallback callback, void *userdata) override {
 		callback_ = callback;
 		userdata_ = userdata;
 	}
-	void EnumerateOutputDevices(std::vector<AudioDeviceDesc> *output);
-	bool InitializeDevice(std::string_view uniqueId, LatencyMode latencyMode);
 
-	int PeriodFrames() const { return actualPeriodFrames_; }  // NOTE: This may have the wrong value (too large) until audio has started playing.
-	int BufferSize() const { return reportedBufferSize_; }
-	float FramesToMs(int frames) const {
-		return 1000.0f * (float)frames / (float)format_->nSamplesPerSec;
-	}
+	void EnumerateDevices(std::vector<AudioDeviceDesc> *outputDevices, bool captureDevices = false);
+
+	bool InitOutputDevice(std::string_view uniqueId, LatencyMode latencyMode);
+
+	void FrameUpdate(bool allowAutoChange) override;
+
+	int PeriodFrames() const override { return actualPeriodFrames_; }  // NOTE: This may have the wrong value (too large) until audio has started playing.
+	int BufferSize() const override { return reportedBufferSize_; }
+	int SampleRate() const override { return format_->nSamplesPerSec; }
 
 	// Implements device change notifications
 	class DeviceNotificationClient : public IMMNotificationClient {
@@ -60,6 +51,7 @@ public:
 		HRESULT STDMETHODCALLTYPE OnDefaultDeviceChanged(EDataFlow flow, ERole role, LPCWSTR) override {
 			if (flow == eRender && role == eConsole) {
 				// PostMessage(hwnd, WM_APP + 1, 0, 0);
+				engine_->defaultDeviceChanged_ = true;
 			}
 			return S_OK;
 		}
@@ -83,7 +75,7 @@ private:
 	IAudioClient *audioClient_ = nullptr;
 
 	IAudioRenderClient* renderClient_ = nullptr;
-	WAVEFORMATEX* format_ = nullptr;
+	WAVEFORMATEX *format_ = nullptr;
 	HANDLE audioEvent_ = nullptr;
 	std::thread audioThread_;
 	UINT32 defaultPeriodFrames = 0, fundamentalPeriodFrames = 0, minPeriodFrames = 0, maxPeriodFrames = 0;
@@ -95,4 +87,6 @@ private:
 	RenderCallback callback_{};
 	void *userdata_ = nullptr;
 	LatencyMode latencyMode_ = LatencyMode::Aggressive;
+	std::string deviceId_;
+	std::atomic<bool> defaultDeviceChanged_{};
 };

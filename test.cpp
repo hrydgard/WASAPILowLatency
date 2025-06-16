@@ -49,8 +49,9 @@ int main() {
 	ShowWindow(hwnd, SW_SHOW);
 	UpdateWindow(hwnd);
 
-	WASAPIContext *engine = new WASAPIContext();
-	engine->SetRenderCallback([](float *dest, int framesToWrite, int channels, int sampleRateHz, void *userdata) {
+	AudioBackend *backend = CreateWASAPI();
+
+	backend->SetRenderCallback([](float *dest, int framesToWrite, int channels, int sampleRateHz, void *userdata) {
 		static double phase = 0.0;
 
 		float* fBuffer = dest;
@@ -74,16 +75,16 @@ int main() {
 	}, nullptr);
 
 	std::vector<AudioDeviceDesc> devices;
-	engine->EnumerateOutputDevices(&devices);
+	backend->EnumerateDevices(&devices);
 	for (auto &device : devices) {
 		printf("%s: %s\n", device.name.c_str(), device.uniqueId.c_str());
 	}
 
-	if (!engine->InitializeDevice("", LatencyMode::Aggressive)) {
+	if (!backend->InitOutputDevice("", LatencyMode::Aggressive)) {
 		printf("Failed to initialize audio\n");
 		return 1;
 	}
-	printf("Initialized audio, got %0.2f (period: %d buffer: %d)\n", engine->FramesToMs(engine->PeriodFrames()), engine->PeriodFrames(), engine->BufferSize());
+	printf("Initialized audio, got %0.2f (period: %d buffer: %d)\n", FramesToMs(backend->PeriodFrames(), backend->SampleRate()), backend->PeriodFrames(), backend->BufferSize());
 
 	MSG msg = {};
 	while (GetMessage(&msg, nullptr, 0, 0) > 0) {
@@ -91,7 +92,7 @@ int main() {
 		DispatchMessage(&msg);
 	}
 
-	delete engine;
+	delete backend;
 
 	CoUninitialize();
 	return 0;
