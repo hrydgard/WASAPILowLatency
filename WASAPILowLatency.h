@@ -8,12 +8,6 @@
 #include <atomic>
 #include <thread>
 
-constexpr int SAMPLE_RATE = 48000;
-constexpr int CHANNELS = 2;
-constexpr double FREQUENCY = 440.0;
-
-extern std::atomic<bool> playTone;
-
 enum class LatencyMode {
 	Safe,
 	Aggressive
@@ -26,30 +20,12 @@ public:
 
 	WASAPIContext(RenderCallback callback, void *userdata);
 	~WASAPIContext();
+
 	void EnumerateOutputDevices();
-
-	void InitializeDevice(LatencyMode latencyMode);
-
-	void Start();
-	void Stop();
-
-	void AudioLoop();
-
+	bool InitializeDevice(LatencyMode latencyMode);
 	int PeriodFrames() const { return actualPeriodFrames_; }
-
-	void FillSineWave(BYTE* buffer, UINT32 frames, double& phase) {
-		float* fBuffer = reinterpret_cast<float*>(buffer);
-		double phaseStep = 2.0 * 3.14159265358979323846 * FREQUENCY / SAMPLE_RATE;
-
-		for (UINT32 i = 0; i < frames; ++i) {
-			float sample = playTone ? static_cast<float>(sin(phase)) : 0.0f;
-			phase += phaseStep;
-			if (phase > 2.0 * 3.14159265358979323846) phase -= 2.0 * 3.14159265358979323846;
-
-			for (int c = 0; c < CHANNELS; ++c) {
-				*fBuffer++ = sample;
-			}
-		}
+	float FramesToMs(int frames) const {
+		return 1000.0f * frames / format_->nSamplesPerSec;
 	}
 
 	// Implements device change notifications
@@ -83,26 +59,25 @@ public:
 	};
 
 private:
-	void RegisterDeviceNotifications();
-	void UnregisterDeviceNotifications();
+	void Start();
+	void Stop();
 
-	float FramesToMs(int frames) const {
-		return 1000.0f * frames / format_->nSamplesPerSec;
-	}
+	void AudioLoop();
 
 	// Only one of these can be non-null at a time. Check audioClient3 to determine if it's being used.
-	IAudioClient3 *audioClient3 = nullptr;
-	IAudioClient *audioClient = nullptr;
+	IAudioClient3 *audioClient3_ = nullptr;
+	IAudioClient *audioClient_ = nullptr;
 
-	IAudioRenderClient* renderClient = nullptr;
+	IAudioRenderClient* renderClient_ = nullptr;
 	WAVEFORMATEX* format_ = nullptr;
 	HANDLE audioEvent_ = nullptr;
-	std::thread audioThread;
+	std::thread audioThread_;
 	UINT32 defaultPeriodFrames = 0, fundamentalPeriodFrames = 0, minPeriodFrames = 0, maxPeriodFrames = 0;
-	std::atomic<bool> running = true;
+	std::atomic<bool> running_ = true;
 	UINT32 actualPeriodFrames_ = 0;  // may not be the requested.
 	IMMDeviceEnumerator *enumerator_ = nullptr;
 	DeviceNotificationClient notificationClient_;
 	RenderCallback callback_{};
 	void *userdata_ = nullptr;
+	LatencyMode latencyMode_ = LatencyMode::Aggressive;
 };
