@@ -9,6 +9,7 @@
 #include <thread>
 #include <vector>
 #include <string>
+#include <string_view>
 
 enum class LatencyMode {
 	Safe,
@@ -33,7 +34,8 @@ public:
 		userdata_ = userdata;
 	}
 	void EnumerateOutputDevices(std::vector<AudioDeviceDesc> *output);
-	bool InitializeDevice(LatencyMode latencyMode);
+	bool InitializeDevice(std::string_view uniqueId, LatencyMode latencyMode);
+
 	int PeriodFrames() const { return actualPeriodFrames_; }  // NOTE: This may have the wrong value (too large) until audio has started playing.
 	int BufferSize() const { return reportedBufferSize_; }
 	float FramesToMs(int frames) const {

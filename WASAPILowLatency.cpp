@@ -90,13 +90,25 @@ void WASAPIContext::EnumerateOutputDevices(std::vector<AudioDeviceDesc> *output)
 	collection->Release();
 }
 
-
-bool WASAPIContext::InitializeDevice(LatencyMode latencyMode) {
+bool WASAPIContext::InitializeDevice(std::string_view uniqueId, LatencyMode latencyMode) {
 	Stop();
 
 	IMMDevice *device = nullptr;
-	if (FAILED(enumerator_->GetDefaultAudioEndpoint(eRender, eConsole, &device))) {
-		return false;
+	if (uniqueId.empty()) {
+		// Use the default device.
+		if (FAILED(enumerator_->GetDefaultAudioEndpoint(eRender, eConsole, &device))) {
+			return false;
+		}
+	} else {
+		// Use whatever device.
+		std::wstring wId = ConvertUTF8ToWString(uniqueId);
+		if (FAILED(enumerator_->GetDevice(wId.c_str(), &device))) {
+			// Fallback to default device
+			printf("Falling back to default device...\n");
+			if (FAILED(enumerator_->GetDefaultAudioEndpoint(eRender, eConsole, &device))) {
+				return false;
+			}
+		}
 	}
 
 	HRESULT hr = E_FAIL;
@@ -209,7 +221,10 @@ void WASAPIContext::AudioLoop() {
 
 	while (running_) {
 		DWORD result = WaitForSingleObject(audioEvent_, INFINITE);
-		if (result != WAIT_OBJECT_0) break;
+		if (result != WAIT_OBJECT_0) {
+			// Something bad happened.
+			break;
+		}
 
 		UINT32 padding = 0, available = 0;
 		if (audioClient3_)

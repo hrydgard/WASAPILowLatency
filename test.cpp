@@ -79,7 +79,7 @@ int main() {
 		printf("%s: %s\n", device.name.c_str(), device.uniqueId.c_str());
 	}
 
-	if (!engine->InitializeDevice(LatencyMode::Aggressive)) {
+	if (!engine->InitializeDevice("", LatencyMode::Aggressive)) {
 		printf("Failed to initialize audio\n");
 		return 1;
 	}
